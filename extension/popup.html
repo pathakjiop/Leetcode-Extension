@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LeetCode Problem Recommender</title>
+  <style>
+    body {
+      width: 350px;
+      padding: 15px;
+      font-family: Arial, sans-serif;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .problem-card {
+      border: 1px solid #e0e0e0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    .timer {
+      font-size: 24px;
+      text-align: center;
+      margin: 10px 0;
+      font-weight: bold;
+    }
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .start-btn, .submit-btn, .complete-btn {
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      flex: 1;
+    }
+    .complete-btn {
+      background-color: #34a853;
+    }
+    .start-btn:hover, .submit-btn:hover, .complete-btn:hover {
+      opacity: 0.9;
+    }
+    .start-btn:disabled, .submit-btn:disabled, .complete-btn:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    .topics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin: 10px 0;
+    }
+    .topic-tag {
+      background-color: #e1f5fe;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+    .current-problem {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+    }
+    .status {
+      font-size: 12px;
+      color: #666;
+      margin-top: 5px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="firstTime" style="display: none;">
+      <h2>Welcome to LeetCode Recommender!</h2>
+      <button id="startJourney" class="start-btn">Start Your Journey</button>
+    </div>
+    
+    <div id="problemTracking" style="display: none;">
+      <div class="current-problem">
+        <h3>Current Problem</h3>
+        <div id="currentProblemTitle"></div>
+        <div id="problemTopics" class="topics"></div>
+        <div class="timer" id="timer">00:00:00</div>
+        <div class="button-group">
+          <button id="startTimer" class="start-btn">Start Timer</button>
+          <button id="markComplete" class="complete-btn">Mark Complete</button>
+        </div>
+        <div class="status" id="status"></div>
+      </div>
+      
+      <div id="nextProblem" style="display: none;">
+        <h3>Next Recommended Problem:</h3>
+        <div id="problemCard" class="problem-card"></div>
+        <button id="goToNext" class="submit-btn">Go to Problem</button>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
