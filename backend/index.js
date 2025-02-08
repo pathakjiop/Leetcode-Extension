@@ -10,186 +10,186 @@ const port = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 app.use(cors());
-
-// Rate limiting
-const limiter = rateLimit({
+app.use(rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100
-});
-app.use(limiter);
+}));
 
 // Constants
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent';
 const API_KEY = process.env.GEMINI_API_KEY;
+const LEETCODE_BASE_URL = 'https://leetcode.com/problems/';
 
-// Predefined prompt templates
-const PROMPT_TEMPLATES = {
-    "expert_coding_mentor": 
-        "As a {coding_language} expert with 20+ years of experience, analyze my performance based on the time taken to solve my last question: {question} in {time}. " +
-        "Time is the most crucial factor—if I take too long on an easy question, it indicates weakness in that topic, and I need more practice. " +
-        "The second weightage factor is my starting skill level ({starting_difficulty}), which should help determine my next question. " +
-        "Adjust difficulty naturally so I don’t notice the increase, reinforcing weak logic by mixing concepts without repeating topics. " +
-        "Ensure my progress is smooth while covering all coding topics. Provide a structured response, and give me **one question at a time**. Do not give more than one question. \n\n" +
-        
-        "**Question Name:**\n" +
-        "**Explanation:**\n" +
-        "**Example Input & Output:**\n" +
-        "**Difficulty Level:**\n" +
-        "**Topic:**\n"+
-        "**Recommendation:**\n"
+// Common LeetCode problems database (example - expand as needed)
+const LEETCODE_PROBLEMS = {
+    'arrays': {
+        'easy': [
+            { id: 1, title: 'Two Sum', slug: 'two-sum' },
+            { id: 26, title: 'Remove Duplicates from Sorted Array', slug: 'remove-duplicates-from-sorted-array' }
+        ],
+        'medium': [
+            { id: 15, title: '3Sum', slug: '3sum' },
+            { id: 33, title: 'Search in Rotated Sorted Array', slug: 'search-in-rotated-sorted-array' }
+        ],
+        'hard': [
+            { id: 41, title: 'First Missing Positive', slug: 'first-missing-positive' },
+            { id: 4, title: 'Median of Two Sorted Arrays', slug: 'median-of-two-sorted-arrays' }
+        ]
+    }
+    // Add more topics and problems as needed
 };
 
+// Simplified prompt template with specific problem request
+const PROMPT_TEMPLATE = 
+    "Based on: Problem '{last_problem}' ({difficulty}), Time: {time_taken}min, Topic: {topic}. " +
+    "If time > expected: Focus on similar problems. If time < expected: Increase difficulty. " +
+    "Generate ONE next problem suggestion in this exact format (include the problem ID if known): " +
+    "Problem ID: [number]\n" +
+    "Problem Title: [exact leetcode title]\n" +
+    "Topic: [topic]\n" +
+    "Difficulty: [easy/medium/hard]\n" +
+    "Focus Area: [what to improve]\n" +
+    "URL Slug: [leetcode-problem-slug]\n";
 
-// Validation middleware
-const validatePromptRequest = (req, res, next) => {
-    const { template, parameters } = req.body;
+// Performance benchmarks for time evaluation
+const TIME_BENCHMARKS = {
+    'easy': 15,    // minutes
+    'medium': 30,
+    'hard': 45
+};
+
+// Track user performance by topic
+const userPerformance = new Map();
+
+// Helper to evaluate performance and adjust difficulty
+const evaluatePerformance = (problem) => {
+    const { topic, difficulty, time_taken } = problem;
+    const expectedTime = TIME_BENCHMARKS[difficulty.toLowerCase()];
+    const performanceRatio = time_taken / expectedTime;
     
-    if (!template || !PROMPT_TEMPLATES[template]) {
+    if (!userPerformance.has(topic)) {
+        userPerformance.set(topic, []);
+    }
+    userPerformance.get(topic).push(performanceRatio);
+    
+    return performanceRatio;
+};
+
+// Helper to parse Gemini response and extract problem details
+const parseProblemResponse = (response) => {
+    const lines = response.split('\n');
+    const problemDetails = {};
+    
+    lines.forEach(line => {
+        if (line.includes(':')) {
+            const [key, value] = line.split(':').map(s => s.trim());
+            problemDetails[key.toLowerCase().replace(/\s+/g, '_')] = value;
+        }
+    });
+
+    return {
+        id: problemDetails.problem_id,
+        title: problemDetails.problem_title,
+        topic: problemDetails.topic,
+        difficulty: problemDetails.difficulty,
+        focus_area: problemDetails.focus_area,
+        url_slug: problemDetails.url_slug
+    };
+};
+
+// Validate request middleware
+const validateRequest = (req, res, next) => {
+    const { last_problem, difficulty, time_taken, topic } = req.body;
+    if (!last_problem || !difficulty || !time_taken || !topic) {
         return res.status(400).json({
             success: false,
-            error: 'Invalid template. Available templates: ' + Object.keys(PROMPT_TEMPLATES).join(', ')
+            error: 'Missing required parameters'
         });
     }
-
-    if (!parameters || typeof parameters !== 'object') {
-        return res.status(400).json({
-            success: false,
-            error: 'Parameters must be provided as an object'
-        });
-    }
-
     next();
 };
 
-// Function to replace parameters in template
-const buildPrompt = (template, parameters) => {
-    let prompt = PROMPT_TEMPLATES[template];
-    
-    // Replace all parameters in the template
-    Object.entries(parameters).forEach(([key, value]) => {
-        const placeholder = `{{${key}}}`;
-        prompt = prompt.replace(placeholder, value);
-    });
-
-    // Check for any remaining unreplaced parameters
-    if (prompt.includes('{{')) {
-        throw new Error('Missing required parameters');
-    }
-
-    return prompt;
-};
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        success: true,
-        message: 'Server is running',
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Enhanced API endpoint with templates
-app.post('/api/ask-gemini', validatePromptRequest, async (req, res) => {
+// Main endpoint for problem suggestions
+app.post('/api/next-problem', validateRequest, async (req, res) => {
     try {
-        const { template, parameters } = req.body;
+        const { last_problem, difficulty, time_taken, topic } = req.body;
+        
+        const performanceRatio = evaluatePerformance({
+            topic,
+            difficulty,
+            time_taken: parseInt(time_taken)
+        });
 
-        // Check if API key is configured
-        if (!API_KEY) {
-            throw new Error('Gemini API key is not configured');
+        let prompt = PROMPT_TEMPLATE
+            .replace('{last_problem}', last_problem)
+            .replace('{difficulty}', difficulty)
+            .replace('{time_taken}', time_taken)
+            .replace('{topic}', topic);
+
+        if (performanceRatio > 1.5) {
+            prompt += "User needs practice in this topic. Suggest similar difficulty level.";
+        } else if (performanceRatio < 0.7) {
+            prompt += "User is proficient. Increase difficulty or introduce new concepts.";
         }
 
-        // Build the prompt from template and parameters
-        const prompt = buildPrompt(template, parameters);
-
-        // API request payload for Gemini
-        const requestBody = {
-            contents: [{
-                parts: [{
-                    text: prompt
-                }]
-            }]
-        };
-
-        // Make request to Gemini API
         const response = await axios.post(
             `${GEMINI_API_URL}?key=${API_KEY}`,
-            requestBody,
             {
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                timeout: 15000
+                contents: [{
+                    parts: [{
+                        text: prompt
+                    }]
+                }]
+            },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 10000
             }
         );
 
-        // Extract and format the response
-        const result = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
+        const suggestion = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
         
-        if (!result) {
+        if (!suggestion) {
             throw new Error('Invalid response from Gemini API');
         }
 
+        // Parse the problem details from the response
+        const problemDetails = parseProblemResponse(suggestion);
+        
+        // Construct the full LeetCode URL
+        const problemUrl = `${LEETCODE_BASE_URL}${problemDetails.url_slug}`;
+
         res.json({
             success: true,
-            data: {
-                template,
-                parameters,
-                response: result,
-                timestamp: new Date().toISOString()
+            problem: {
+                ...problemDetails,
+                url: problemUrl
+            },
+            performance: {
+                topic,
+                ratio: performanceRatio.toFixed(2),
+                message: performanceRatio > 1.5 ? 
+                    "Additional practice recommended in this topic" : 
+                    performanceRatio < 0.7 ? 
+                    "Ready for more challenging problems" : 
+                    "Progressing well at current difficulty"
             }
         });
 
     } catch (error) {
-        console.error('Error processing request:', error);
-
-        let statusCode = 500;
-        let errorMessage = 'Internal server error';
-
-        if (error.message === 'Missing required parameters') {
-            statusCode = 400;
-            errorMessage = error.message;
-        } else if (error.response) {
-            statusCode = error.response.status;
-            errorMessage = error.response.data.error || 'Error from Gemini API';
-        } else if (error.code === 'ECONNABORTED') {
-            statusCode = 504;
-            errorMessage = 'Request timeout';
-        }
-
-        res.status(statusCode).json({
+        console.error('Error:', error);
+        res.status(error.response?.status || 500).json({
             success: false,
-            error: errorMessage
+            error: error.message || 'Internal server error'
         });
     }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
-    res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-    });
+// Health check endpoint
+app.get('/health', (_, res) => {
+    res.status(200).json({ status: 'healthy' });
 });
 
-// Handle 404 routes
-app.use((req, res) => {
-    res.status(404).json({
-        success: false,
-        error: 'Route not found'
-    });
-});
-
-// Start server
 app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received. Shutting down gracefully...');
-    server.close(() => {
-        console.log('Server closed');
-        process.exit(0);
-    });
+    console.log(`Server running on port ${port}`);
 });
